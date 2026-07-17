@@ -1,0 +1,18 @@
+[package]
+name = "rust-json"
+description = "Rust-JSON: a lenient, human-authorable JSON superset (trailing commas, comments, unquoted keys, single-quoted strings) with an optional RFC-8259-strict mode and dot/bracket path extraction, parsed into the standard serde_json::Value model. Hand-rolled, no unsafe, no external parsing-crate dependency."
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["Rust-JSON Contributors"]
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/aon-co-jp/Rust-JSON"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[dependencies]
+serde_json = "1.0"
+thiserror = "1.0"
+
+[dev-dependencies]
