@@ -159,6 +159,44 @@ pub fn to_string(value: &Value) -> String {
     serde_json::to_string(value).expect("serde_json::Value serialization is infallible")
 }
 
+/// Deserialize a typed value from strict JSON bytes -- the typed
+/// counterpart to [`parse_strict`] for call sites that have a concrete
+/// `#[derive(Deserialize)]` struct/enum rather than a [`Value`] (storage
+/// records, RPC/replication wire formats, backup manifests, ...).
+/// Delegates to `serde_json::from_slice`, so output is byte-for-byte
+/// identical to calling `serde_json` directly -- safe to use anywhere a
+/// checksum or other byte-exact comparison is computed over the
+/// serialized form.
+pub fn from_slice_strict<T: serde::de::DeserializeOwned>(
+    bytes: &[u8],
+) -> Result<T, RustJsonError> {
+    serde_json::from_slice(bytes).map_err(|e| RustJsonError::StrictModeRejected(e.to_string()))
+}
+
+/// Same as [`from_slice_strict`], but from a `&str` source.
+pub fn from_str_strict<T: serde::de::DeserializeOwned>(input: &str) -> Result<T, RustJsonError> {
+    serde_json::from_str(input).map_err(|e| RustJsonError::StrictModeRejected(e.to_string()))
+}
+
+/// Serialize a typed value to compact strict-JSON bytes -- the typed
+/// counterpart to [`to_string`]. Delegates to `serde_json::to_vec`, so
+/// output is byte-for-byte identical to calling `serde_json` directly.
+pub fn to_vec_strict<T: serde::Serialize + ?Sized>(value: &T) -> Result<Vec<u8>, RustJsonError> {
+    serde_json::to_vec(value).map_err(|e| RustJsonError::StrictModeRejected(e.to_string()))
+}
+
+/// Serialize a typed value to compact strict-JSON text.
+pub fn to_string_strict<T: serde::Serialize + ?Sized>(value: &T) -> Result<String, RustJsonError> {
+    serde_json::to_string(value).map_err(|e| RustJsonError::StrictModeRejected(e.to_string()))
+}
+
+/// Serialize a typed value to pretty-printed strict-JSON text.
+pub fn to_string_pretty_strict<T: serde::Serialize + ?Sized>(
+    value: &T,
+) -> Result<String, RustJsonError> {
+    serde_json::to_string_pretty(value).map_err(|e| RustJsonError::StrictModeRejected(e.to_string()))
+}
+
 /// Server-side partial extraction (Phase 2, 2026-07-14) — the network-
 /// bandwidth-savings benefit from the original RustJSON proposal: pull just
 /// the field(s) a caller actually needs out of a stored value, instead of
@@ -530,6 +568,46 @@ mod tests {
     #[test]
     fn parse_strict_rejects_trailing_comma() {
         assert!(matches!(parse_strict(r#"{"a": 1,}"#), Err(RustJsonError::StrictModeRejected(_))));
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
+    struct TypedRecord {
+        id: u32,
+        name: String,
+    }
+
+    #[test]
+    fn typed_strict_round_trip_via_slice() {
+        let record = TypedRecord { id: 1, name: "Alice".to_string() };
+        let bytes = to_vec_strict(&record).unwrap();
+        let round_tripped: TypedRecord = from_slice_strict(&bytes).unwrap();
+        assert_eq!(record, round_tripped);
+    }
+
+    #[test]
+    fn typed_strict_round_trip_via_str() {
+        let record = TypedRecord { id: 2, name: "Bob".to_string() };
+        let text = to_string_pretty_strict(&record).unwrap();
+        let round_tripped: TypedRecord = from_str_strict(&text).unwrap();
+        assert_eq!(record, round_tripped);
+    }
+
+    #[test]
+    fn to_string_strict_matches_serde_json() {
+        let record = TypedRecord { id: 4, name: "Dave".to_string() };
+        assert_eq!(to_string_strict(&record).unwrap(), serde_json::to_string(&record).unwrap());
+    }
+
+    #[test]
+    fn typed_strict_bytes_match_serde_json_exactly() {
+        let record = TypedRecord { id: 3, name: "Carol".to_string() };
+        assert_eq!(to_vec_strict(&record).unwrap(), serde_json::to_vec(&record).unwrap());
+    }
+
+    #[test]
+    fn from_slice_strict_rejects_malformed_json() {
+        let result: Result<TypedRecord, RustJsonError> = from_slice_strict(b"{not json");
+        assert!(matches!(result, Err(RustJsonError::StrictModeRejected(_))));
     }
 
     #[test]
