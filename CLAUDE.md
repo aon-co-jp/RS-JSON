@@ -4,7 +4,7 @@
 
 `Rust-JSON`は、以前`open-runo`/`poem-cosmo-tauri`内のクレート
 (`open-runo-rjson`→`open-runo-rustjson`)として存在していた、
-石塚正浩(aon CEO)発案・Claude実装のJSON拡張仕様を、**独立リポジトリ
+ユーザー発案・Claude実装のJSON拡張仕様を、**独立リポジトリ
 として切り出し、改称したもの**。作業ドライブは`F:\open-runo\Rust-JSON`、
 VPS上は`/root/Rust-JSON`、GitHubは
 [aon-co-jp/Rust-JSON](https://github.com/aon-co-jp/Rust-JSON)。

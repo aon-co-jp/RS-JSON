@@ -1,5 +1,5 @@
 //! **Rust-JSON** — a lenient, human-authorable JSON superset with an
-//! optional strict-mode escape hatch (concept: 石塚正浩, aon CEO; grammar
+//! optional strict-mode escape hatch (concept: user; grammar
 //! design and this implementation: Claude, 2026-07-14 as "RJSON"/"RustJSON",
 //! renamed and split into its own repository 2026-07-17).
 //!
