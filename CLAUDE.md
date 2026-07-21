@@ -120,3 +120,12 @@ cargo test
      RGit側`CLAUDE.md`参照。
   - 次にすべきこと: 上記(1)(`aruaru-db`/`open-raid-z`の移行)は引き続き
     未着手。
+---
+
+## エコシステム全体マップ(2026-07-21追記)
+
+同時並行開発の対象プロジェクト一覧・各リポジトリの現況は
+[`open-raid-z`のCLAUDE.md](https://github.com/aon-co-jp/open-raid-z/blob/main/CLAUDE.md)
+「関連プロジェクト」節を参照。**どのリポジトリから読み始めても、
+この節を起点に他プロジェクトへ辿れる**ようにしてある(このリポジトリ
+自身の状況はこの上のHANDOFF節を参照)。
