@@ -1,19 +1,29 @@
 [package]
 name = "rust-json"
-description = "Rust-JSON: a lenient, human-authorable JSON superset (trailing commas, comments, unquoted keys, single-quoted strings) with an optional RFC-8259-strict mode and dot/bracket path extraction, parsed into the standard serde_json::Value model. Hand-rolled, no unsafe, no external parsing-crate dependency."
+description = "Rust-JSON: a lenient, human-authorable JSON superset (trailing commas, comments, unquoted keys, single-quoted strings) with an optional RFC-8259-strict mode and dot/bracket path extraction, parsed into the standard serde_json::Value model. Hand-rolled, no unsafe, no external parsing-crate dependency. Also ships a dependency-free `light` module (JS `JSON.parse` equivalent) for size-constrained targets such as WASM."
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 authors = ["Rust-JSON Contributors"]
 license = "Apache-2.0 OR MIT"
-repository = "https://github.com/aon-co-jp/Rust-JSON"
+repository = "https://github.com/aon-co-jp/RJSON"
 
 [lints.rust]
 unsafe_code = "deny"
 
+[features]
+# `light`モジュール(依存ゼロ、ブラウザJSON.parse相当)は常に使える。
+# `full`(既定ON)を切ると、serde_json依存の`parse`/`parse_strict`/
+# `extract_path`(serde_json::Value版)一式がビルド対象から外れる——
+# WASM等でこのクレートを使う側は`default-features = false`にすることで
+# serde_json依存そのものをビルドグラフから排除できる(RGitのweb/crateが
+# これを利用、2026-07-21)。
+default = ["full"]
+full = ["dep:serde_json", "dep:serde", "dep:thiserror"]
+
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "1.0"
+serde_json = { version = "1.0", optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+thiserror = { version = "1.0", optional = true }
 
 [dev-dependencies]

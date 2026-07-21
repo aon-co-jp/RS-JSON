@@ -92,3 +92,31 @@ cargo test
   次にすべきこと: (1) `aruaru-db`/`open-raid-z`側のJSON使用箇所を
   `Rust-JSON`に置き換える移行作業、(2) GitHubへの初回push、(3) VPS
   `/root/Rust-JSON`へのクローン。
+
+- **2026-07-21 `light`モジュール新設(ブラウザ`JSON.parse`相当、依存ゼロ)
+  — `full` featureで既存APIを分離**: ユーザー指示「JSONにブラウザの
+  JSON.parse(js_sys::JSON)のRust版も含めて」を受け、
+  [RGit](https://github.com/aon-co-jp/RGit)のWASMフロントエンド
+  (`web/`crate)が自前で持っていた最小JSONパーサをこちらへ統合。
+  1. **`src/light.rs`新設**: `serde_json`に一切依存しない独立の値モデル
+     `LightValue`+`parse_light()`。RFC 8259厳密モードのみ受理
+     (このクレートの寛容拡張は非対応——ブラウザ`JSON.parse`自体が
+     それらを受理しないことに合わせた意図的な仕様)。`extract_path`相当も
+     `LightValue::extract_path`として独自実装(依存ゼロという制約上、
+     既存の`extract_path`とはコードを共有できないため)。
+  2. **既存コードを`src/full.rs`へ切り出し、`full` feature(既定ON)配下に
+     分離**: `serde_json`/`serde`/`thiserror`を`optional = true`にし、
+     `default-features = false`で無効化すれば依存グラフから完全に
+     排除できるようにした。既存の`aruaru-db`/`open-raid-z`等の利用側は
+     `default-features`が既定`true`のままなので**変更不要**(公開API・
+     挙動とも無変更)。
+  3. **検証**: `cargo test`(default、41件)・`cargo test
+     --no-default-features`(light単体、6件)の両方で実行、後者は
+     `serde_json`が依存グラフに一切現れないことも確認済み。
+  4. **RGit側の統合結果**: `web/Cargo.toml`で`rust-json = { path =
+     "../../RJSON", default-features = false }`として依存、
+     `wasm32-unknown-unknown --release`ビルド成功、`wasm-bindgen`で
+     生成した`.wasm`は234KB(`serde_json`を含まないため)。詳細は
+     RGit側`CLAUDE.md`参照。
+  - 次にすべきこと: 上記(1)(`aruaru-db`/`open-raid-z`の移行)は引き続き
+    未着手。
