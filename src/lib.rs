@@ -100,6 +100,6 @@ pub mod light;
 pub use light::{parse_light, LightError, LightValue};
 
 #[cfg(feature = "full")]
-mod full;
+pub mod full;
 #[cfg(feature = "full")]
 pub use full::*;
