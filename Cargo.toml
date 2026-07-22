@@ -6,7 +6,7 @@ edition = "2021"
 rust-version = "1.75"
 authors = ["Rust-JSON Contributors"]
 license = "Apache-2.0 OR MIT"
-repository = "https://github.com/aon-co-jp/RJSON"
+repository = "https://github.com/aon-co-jp/RS-JSON"
 
 [lints.rust]
 unsafe_code = "deny"
