@@ -27,3 +27,5 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 thiserror = { version = "1.0", optional = true }
 
 [dev-dependencies]
+# examples/bench.rs の比較対象(SIMD版)。ライブラリ本体の依存には入らない。
+sonic-rs = "0.3"

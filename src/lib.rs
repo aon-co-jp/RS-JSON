@@ -103,3 +103,7 @@ pub use light::{parse_light, LightError, LightValue};
 pub mod full;
 #[cfg(feature = "full")]
 pub use full::*;
+#[cfg(feature = "full")]
+pub mod secure;
+#[cfg(feature = "full")]
+pub use secure::{from_str_secure, parse_secure, Limits};

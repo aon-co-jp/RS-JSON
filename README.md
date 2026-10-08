@@ -54,6 +54,31 @@ let damage = extract_path(&value, "stats.damage");
 let canonical = to_string(&value);
 ```
 
+## 安全な厳密モード(`parse_secure`、2026-10-08追加)
+
+外部から来る信頼できないJSON(HTTPの本文、ネットワーク越しのキャッシュ等)を読む入口向け。
+標準の`parse_strict`に、**サイズ上限**(既定16 MiB)・**ネスト深さ上限**(既定64)・
+**重複キー拒否**を足す。`unsafe`なし、値モデルは`serde_json::Value`のまま。
+
+```rust
+use rust_json::{parse_secure, Limits};
+let v = parse_secure(body, &Limits::small())?; // 1 MiB・深さ32・重複キー拒否
+```
+
+### 実測(`cargo run --release --example bench`、7 MB・4万件、最速7回)
+
+| 方式 | 時間 | serde_json比 |
+|---|---|---|
+| `serde_json::from_str<Value>` | 182 ms | 1.00 |
+| `parse_strict` | 181 ms | 0.99 |
+| **`parse_secure`(安全)** | 208 ms | **+14%** |
+| `parse`(寛容) | 300 ms | +65% |
+| `sonic-rs`(SIMD、参考) | 31 ms | **-83%(約5.8倍速い)** |
+
+**正直な開示**: `parse_secure`は速度ではなく**防御**のための機能で、標準より約14%遅い。
+速度が最優先なら`sonic-rs`(SIMD、依存先が`unsafe`を使う)が約5.8倍速いが、値モデルが
+`serde_json::Value`と異なる。安全モードと同じ上限をSIMD版に付ける案は未実装。
+
 ## ビルド・テスト
 
 ```bash
