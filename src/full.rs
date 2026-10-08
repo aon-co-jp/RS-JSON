@@ -24,6 +24,15 @@ pub enum RustJsonError {
     UnterminatedComment(usize),
     #[error("trailing data after the top-level value, starting at byte {0}")]
     TrailingData(usize),
+    /// [`crate::parse_secure`]: the input is larger than `Limits::max_bytes`.
+    #[error("input too large: {size} bytes (limit {max})")]
+    TooLarge { size: usize, max: usize },
+    /// [`crate::parse_secure`]: nesting is deeper than `Limits::max_depth`.
+    #[error("nesting too deep: {depth} levels (limit {max})")]
+    TooDeep { depth: usize, max: usize },
+    /// [`crate::parse_secure`]: the same key appears twice in one object.
+    #[error("duplicate object key `{0}`")]
+    DuplicateKey(String),
     /// [`parse_strict`] rejected input that needed one of this crate's
     /// leniency extensions (comments, trailing commas, unquoted keys,
     /// single-quoted strings) to parse -- i.e. it wasn't valid RFC 8259
