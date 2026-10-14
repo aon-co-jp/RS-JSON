@@ -158,6 +158,94 @@ pub fn parse_secure(input: &str, limits: &Limits) -> Result<Value, RustJsonError
     Ok(value)
 }
 
+/// [`parse_secure`]と同じ上限・同じ結果のまま、読み取りだけをSIMD版(`sonic-rs`)で行う
+/// (任意機能`fast`、2026-10-14追加)。値の型は`serde_json::Value`のまま。
+///
+/// **正直な開示**: 依存先の`sonic-rs`は内部で`unsafe`を使う(この関数を使う側のコードに`unsafe`は無い)。
+/// 速さは`examples/bench.rs`の実測を参照。サイズ・深さの検査と重複キーの拒否は、
+/// [`parse_secure`]と同じ処理を通す(SIMDで読む前に、先に1回走査して上限を確認する)。
+#[cfg(feature = "fast")]
+pub fn parse_secure_fast(input: &str, limits: &Limits) -> Result<Value, RustJsonError> {
+    if input.len() > limits.max_bytes {
+        return Err(RustJsonError::TooLarge { size: input.len(), max: limits.max_bytes });
+    }
+    if let Some(depth) = depth_exceeds(input.as_bytes(), limits.max_depth) {
+        return Err(RustJsonError::TooDeep { depth, max: limits.max_depth });
+    }
+    let mut de = sonic_rs::Deserializer::from_str(input);
+    let value = StrictValue { reject_dups: limits.reject_duplicate_keys }
+        .deserialize(&mut de)
+        .map_err(|e| duplicate_or_strict(e.to_string()))?;
+    // sonic-rsは末尾の確認を公開していない。もう1つ値を読もうとして**失敗する**(=空白以外の
+    // 余計なデータが無い)ことで確かめる。読めてしまった/別の理由で失敗した場合は拒否する。
+    match de.deserialize::<serde::de::IgnoredAny>() {
+        Err(e) if e.to_string().to_lowercase().contains("eof") || e.to_string().to_lowercase().contains("end of") => Ok(value),
+        Err(e) => Err(RustJsonError::StrictModeRejected(format!("trailing data: {e}"))),
+        Ok(_) => Err(RustJsonError::StrictModeRejected("trailing data after the top-level value".into())),
+    }
+}
+
+/// **速い値の型で読む安全モード**(任意機能`fast`、2026-10-14追加)。結果は`sonic_rs::Value`
+/// (結果を連続した領域に詰め込む型)で、`serde_json::Value`より約5〜6倍速く組み立てられる
+/// (実測は`examples/bench.rs`)。サイズ・深さの上限と、重複キーの拒否は[`parse_secure`]と同じ。
+///
+/// **注意**: 値の型が`serde_json::Value`ではない。読む側は`sonic_rs`のトレイト
+/// (`JsonValueTrait`・`JsonContainerTrait`)で`get`/`as_str`/`as_array`等を使う。
+/// 依存先の`sonic-rs`は内部で`unsafe`を使う(この関数を使う側のコードに`unsafe`は無い)。
+#[cfg(feature = "fast")]
+pub fn parse_secure_sonic(input: &str, limits: &Limits) -> Result<sonic_rs::Value, RustJsonError> {
+    if input.len() > limits.max_bytes {
+        return Err(RustJsonError::TooLarge { size: input.len(), max: limits.max_bytes });
+    }
+    if let Some(depth) = depth_exceeds(input.as_bytes(), limits.max_depth) {
+        return Err(RustJsonError::TooDeep { depth, max: limits.max_depth });
+    }
+    let value: sonic_rs::Value =
+        sonic_rs::from_str(input).map_err(|e| RustJsonError::StrictModeRejected(e.to_string()))?;
+    if limits.reject_duplicate_keys {
+        if let Some(key) = find_duplicate_key(&value) {
+            return Err(RustJsonError::DuplicateKey(key));
+        }
+    }
+    Ok(value)
+}
+
+/// 値を歩いて、同じオブジェクトの中に同じキーが2回ある場合、そのキーを返す。
+/// 小さなオブジェクト(大半)は総当たり、大きなものはハッシュ集合で調べる。
+#[cfg(feature = "fast")]
+fn find_duplicate_key(v: &sonic_rs::Value) -> Option<String> {
+    use sonic_rs::JsonContainerTrait; // `as_object`/`as_array`/`iter`
+    if let Some(obj) = v.as_object() {
+        let keys: Vec<&str> = obj.iter().map(|(k, _)| k).collect();
+        if keys.len() <= 16 {
+            for (i, a) in keys.iter().enumerate() {
+                if keys[i + 1..].contains(a) {
+                    return Some((*a).to_string());
+                }
+            }
+        } else {
+            let mut seen = std::collections::HashSet::with_capacity(keys.len());
+            for k in &keys {
+                if !seen.insert(*k) {
+                    return Some((*k).to_string());
+                }
+            }
+        }
+        for (_, child) in obj.iter() {
+            if let Some(d) = find_duplicate_key(child) {
+                return Some(d);
+            }
+        }
+    } else if let Some(arr) = v.as_array() {
+        for child in arr.iter() {
+            if let Some(d) = find_duplicate_key(child) {
+                return Some(d);
+            }
+        }
+    }
+    None
+}
+
 /// 型付きで読む版(`#[derive(Deserialize)]`の構造体向け)。サイズと深さの上限だけを検査する
 /// (構造体のフィールド重複は`serde`のderiveが標準でエラーにする)。
 pub fn from_str_secure<T: serde::de::DeserializeOwned>(input: &str, limits: &Limits) -> Result<T, RustJsonError> {
@@ -249,5 +337,50 @@ mod tests {
         }
         assert_eq!(from_str_secure::<P>(r#"{"n":3}"#, &Limits::default()).unwrap(), P { n: 3 });
         assert!(matches!(from_str_secure::<P>(r#"{"n":3}"#, &lim(3, 8)), Err(RustJsonError::TooLarge { .. })));
+    }
+
+    #[cfg(feature = "fast")]
+    #[test]
+    fn fast_gives_same_result_and_same_defences() {
+        let doc = "{\"a\":[1,2.5,-3,true,null,\"x\"],\"b\":{\"c\":\"d\",\"e\":[]},\"u\":\"日本語\\n\\\"q\\\"\",\"n\":12345678901234,\"f\":1e3}";
+        let std: Value = serde_json::from_str(doc).unwrap();
+        assert_eq!(parse_secure_fast(doc, &Limits::default()).unwrap(), std);
+        assert_eq!(parse_secure_fast(doc, &Limits::default()).unwrap(), parse_secure(doc, &Limits::default()).unwrap());
+        // 防御は同じ
+        assert!(matches!(parse_secure_fast(r#"{"a":"0123456789"}"#, &lim(8, 64)), Err(RustJsonError::TooLarge { .. })));
+        let deep = "[".repeat(10_000) + &"]".repeat(10_000);
+        assert!(matches!(parse_secure_fast(&deep, &lim(1 << 20, 64)), Err(RustJsonError::TooDeep { .. })));
+        assert_eq!(parse_secure_fast(r#"{"r":1,"r":2}"#, &Limits::default()).unwrap_err(), RustJsonError::DuplicateKey("r".into()));
+        for bad in ["{a:1}", "[1,2,]", "{'a':1}", "// c
+{}", "NaN", "[1] x", ""] {
+            assert!(parse_secure_fast(bad, &Limits::default()).is_err(), "should reject {bad:?}");
+        }
+    }
+
+    #[cfg(feature = "fast")]
+    #[test]
+    fn sonic_variant_has_same_defences_and_same_content() {
+        use sonic_rs::{JsonContainerTrait, JsonValueTrait};
+        let doc = "{\"a\":[1,2.5,-3,true,null,\"x\"],\"b\":{\"c\":\"d\",\"e\":[]},\"u\":\"日本語\\n\\\"q\\\"\"}";
+        let v = parse_secure_sonic(doc, &Limits::default()).unwrap();
+        assert_eq!(v.get("b").get("c").as_str(), Some("d"));
+        assert_eq!(v.get("a").as_array().map(|a| a.len()), Some(6));
+        assert_eq!(v.get("u").as_str(), Some("日本語
+\"q\""));
+        // 防御は同じ
+        assert!(matches!(parse_secure_sonic(r#"{"a":"0123456789"}"#, &lim(8, 64)), Err(RustJsonError::TooLarge { .. })));
+        let deep = "[".repeat(10_000) + &"]".repeat(10_000);
+        assert!(matches!(parse_secure_sonic(&deep, &lim(1 << 20, 64)), Err(RustJsonError::TooDeep { .. })));
+        assert_eq!(parse_secure_sonic(r#"{"r":1,"r":2}"#, &Limits::default()).unwrap_err(), RustJsonError::DuplicateKey("r".into()));
+        // 入れ子・配列の中・大きなオブジェクトの重複も検出する
+        assert!(matches!(parse_secure_sonic(r#"{"a":{"x":1,"x":2}}"#, &Limits::default()), Err(RustJsonError::DuplicateKey(_))));
+        assert!(matches!(parse_secure_sonic(r#"[{"x":1},{"y":1,"y":2}]"#, &Limits::default()), Err(RustJsonError::DuplicateKey(_))));
+        let big: String = (0..40).map(|i| format!("\"k{i}\":1")).collect::<Vec<_>>().join(",") + ",\"k7\":2";
+        assert!(matches!(parse_secure_sonic(&format!("{{{big}}}"), &Limits::default()), Err(RustJsonError::DuplicateKey(k)) if k == "k7"));
+        assert!(parse_secure_sonic(r#"[{"x":1},{"x":2}]"#, &Limits::default()).is_ok());
+        for bad in ["{a:1}", "[1,2,]", "{'a':1}", "// c
+{}", "NaN", "[1] x", ""] {
+            assert!(parse_secure_sonic(bad, &Limits::default()).is_err(), "should reject {bad:?}");
+        }
     }
 }

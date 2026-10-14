@@ -20,12 +20,14 @@ unsafe_code = "deny"
 # これを利用、2026-07-21)。
 default = ["full"]
 full = ["dep:serde_json", "dep:serde", "dep:thiserror"]
+# `parse_secure_fast`: 安全モードと同じ上限のまま、読み取りだけをSIMD(sonic-rs)にする。値の型はserde_json::Valueのまま。
+fast = ["full", "dep:sonic-rs"]
 
 [dependencies]
 serde_json = { version = "1.0", optional = true }
+# SIMD版パーサ(任意機能`fast`)。依存先が内部でunsafeを使う。既定ではビルドに入らない。
+sonic-rs = { version = "0.3", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 thiserror = { version = "1.0", optional = true }
 
 [dev-dependencies]
-# examples/bench.rs の比較対象(SIMD版)。ライブラリ本体の依存には入らない。
-sonic-rs = "0.3"

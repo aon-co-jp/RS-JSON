@@ -107,3 +107,5 @@ pub use full::*;
 pub mod secure;
 #[cfg(feature = "full")]
 pub use secure::{from_str_secure, parse_secure, Limits};
+#[cfg(feature = "fast")]
+pub use secure::{parse_secure_fast, parse_secure_sonic};
