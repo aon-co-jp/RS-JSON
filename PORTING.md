@@ -100,26 +100,51 @@ Reading into `serde_json::Value` gives almost no speed-up even with SIMD (188 ms
 
 **Status in this repository**: Provider. Implements `parse_secure` and `parse_secure_sonic` (`fast` feature), with tests and measurements.
 
-## 姉妹リポジトリ: `sonic-rs` と `RS-JSON`(2026-10-15)
-[`sonic-rs`](https://github.com/aon-co-jp/sonic-rs)と[`RS-JSON`](https://github.com/aon-co-jp/RS-JSON)は**姉妹リポジトリ**。2つで1組として扱う。
+## 高速な読み書きとJSON <-> RS-JSON変換(`fast`機能、`sonic-rs`リポジトリを統合、2026-10-15)
+旧`sonic-rs`リポジトリ(評価記録と導入方針の文書のみ)は**このリポジトリに統合した**(内容はこの文書群に取り込み済み)。本家の`sonic-rs`(CloudWeGo/ByteDance、Apache-2.0)とは別物で、依存先として使うだけ。
 
-| リポジトリ | 役割 |
-|---|---|
-| [`RS-JSON`](https://github.com/aon-co-jp/RS-JSON) | **コードの実体**。`parse_secure`(安全)・`parse_secure_sonic`(速い型+安全、`fast`機能)・`light`(WASM用)。テストと実測ベンチ(`examples/bench.rs`)を持つ |
-| [`sonic-rs`](https://github.com/aon-co-jp/sonic-rs) | **評価の記録と導入方針**(文書のみ)。実測の読み方、使える所/使えない所、各リポジトリへの適用状況 |
+**`rust_json::fast`**(`fast`機能): `from_str`/`from_slice`/`to_string`/`to_vec`/`to_string_pretty`(型付き構造体、`sonic-rs`)、
+`rsjson_to_json`/`json_to_rsjson`(RS-JSON<->JSON、値を作らない1パス走査+検証)、`from_rsjson`/`to_rsjson`(型付き)。
 
-- このリポジトリ(`RS-JSON`)ははコードの実体と実測ベンチを持つ。`sonic-rs`は評価の記録と導入方針を持つ(文書のみ)。
-- **片方を更新したら、もう片方も追従する**(実測値・方針・適用状況が食い違わないようにする)。数値の正本は`RS-JSON`の`examples/bench.rs`の実測、方針の正本は`sonic-rs`の`PORTING.md`。
-- 本家の`sonic-rs`(CloudWeGo/ByteDance、Apache-2.0)とは別物。`sonic-rs`リポジトリは本家のコードを含まず、提携関係もない。
+**実測(7 MB・4万件、`cargo run --release --features fast --example bench`、最速7回)**
+| 処理 | 標準 | fast | 結果 |
+|---|---|---|---|
+| `sonic_rs::Value`へ読む(`parse_secure_sonic`、防御込み) | `serde_json::Value` 178 ms | 88 ms | **約2倍速い** |
+| 型付き構造体へ読む | 76 ms | 71 ms | **約1.1倍(ほぼ変わらない)** |
+| 型付き構造体を書く | 30 ms | 37 ms | **むしろ遅い(0.8倍)** |
+| JSON → RS-JSON(`json_to_rsjson`) | 寛容パーサ経由 144 ms | 40 ms | 約3.6倍 |
+| RS-JSON → JSON(厳密JSON入力) | 85 ms | 17 ms | 約5倍 |
+| RS-JSON → JSON(寛容構文あり) | 344 ms | 48 ms | **約7倍** |
 
-## Sister repositories: `sonic-rs` and `RS-JSON` (2026-10-15)
-[`sonic-rs`](https://github.com/aon-co-jp/sonic-rs) and [`RS-JSON`](https://github.com/aon-co-jp/RS-JSON) are **sister repositories**. Treat the two as a pair.
+**正直な結論**: 速いのは「`sonic_rs::Value`に読む」場合と「RS-JSON<->JSONの変換」。**型付き構造体の読み書きは、文字列ごとの確保が支配的でほぼ速くならず、書き出しは`serde_json`より遅い。**
+そのため型付き読み込みの置き換えは効果が小さい(害も小さい)。`fast::to_string`は速度目的では使わない。
 
-| Repository | Role |
-|---|---|
-| [`RS-JSON`](https://github.com/aon-co-jp/RS-JSON) | **The code.** `parse_secure` (secure), `parse_secure_sonic` (fast type + secure, `fast` feature) and `light` (for WASM). Holds the tests and the measurement bench (`examples/bench.rs`) |
-| [`sonic-rs`](https://github.com/aon-co-jp/sonic-rs) | **Evaluation notes and adoption policy** (documents only): how to read the measurements, where it can / cannot be used, and each repository's adoption status |
+**導入手順**: `Cargo.toml`に `rust-json = { path = "../RS-JSON", features = ["fast"] }`(GitHubのCIが兄弟ディレクトリを持たないリポジトリは、型付き読み込みに限り`sonic-rs = "0.3"`を直接依存にしてよい)。
+読む場所を`parse_secure_sonic`に替え、使う側を`sonic_rs::{JsonContainerTrait, JsonValueTrait}`のメソッドに書き換える。公開APIの戻り値が`serde_json::Error`の関数は、型が変わるので置き換えない。
 
-- This repository (`RS-JSON`) holds the code and the measurement bench. `sonic-rs` holds the evaluation notes and the adoption policy (documents only).
-- **When you update one, update the other too** so the measured numbers, the policy and the adoption status never disagree. The source of truth for numbers is the measurement in `RS-JSON`'s `examples/bench.rs`; for the policy it is `PORTING.md` in `sonic-rs`.
-- It is unrelated to the upstream `sonic-rs` (CloudWeGo/ByteDance, Apache-2.0). The `sonic-rs` repository contains none of its code and has no affiliation with it.
+**適用状況(2026-10-15)**: 型付き読み込みを`sonic_rs::from_str/from_slice`へ置き換え済み(ビルド確認済み): `aruaru-IME`(`aruaru-ime-core`、テスト178件合格)・`aruaru-llm`・`aruaru-search`・`realdata.pro`・`open-backup`・`open-web-server`・`open-bar`・`webeditor-sftp`。
+`aruaru-llm`の外部取り込みは`parse_secure`。`Value`を受け渡している箇所・`audiocafe-tokyo-rust`の`fetch_cache`は未切り替え(型の書き換えが要る)。
+## Fast read/write and JSON <-> RS-JSON conversion (`fast` feature, absorbs the `sonic-rs` repository, 2026-10-15)
+The former `sonic-rs` repository (evaluation notes and adoption policy, documents only) has been **merged into this repository**. It was never the upstream `sonic-rs` (CloudWeGo/ByteDance, Apache-2.0); that crate is only a dependency here.
+
+**`rust_json::fast`** (`fast` feature): `from_str`/`from_slice`/`to_string`/`to_vec`/`to_string_pretty` (typed structs, via `sonic-rs`),
+`rsjson_to_json`/`json_to_rsjson` (RS-JSON <-> JSON, a single value-less scan plus validation), `from_rsjson`/`to_rsjson` (typed).
+
+**Measured (7 MB, 40,000 records, `cargo run --release --features fast --example bench`, best of 7)**
+| Operation | Baseline | fast | Result |
+|---|---|---|---|
+| Read into `sonic_rs::Value` (`parse_secure_sonic`, with defences) | `serde_json::Value` 178 ms | 88 ms | **about 2x faster** |
+| Read into typed structs | 76 ms | 71 ms | **about 1.1x (almost no change)** |
+| Write typed structs | 30 ms | 37 ms | **slower (0.8x)** |
+| JSON -> RS-JSON (`json_to_rsjson`) | via lenient parser 144 ms | 40 ms | about 3.6x |
+| RS-JSON -> JSON (strict input) | 85 ms | 17 ms | about 5x |
+| RS-JSON -> JSON (lenient syntax) | 344 ms | 48 ms | **about 7x** |
+
+**Honest conclusion**: the wins are reading into `sonic_rs::Value` and the RS-JSON <-> JSON conversions. **Typed reads/writes are dominated by per-string allocation and barely speed up; writing is slower than `serde_json`.**
+So replacing typed reads yields a small gain (and small risk). Do not use `fast::to_string` for speed.
+
+**Adoption**: `rust-json = { path = "../RS-JSON", features = ["fast"] }` (repositories whose GitHub CI has no sibling directory may depend on `sonic-rs = "0.3"` directly, for typed reads only).
+Switch reads to `parse_secure_sonic` and rewrite the consumers with `sonic_rs::{JsonContainerTrait, JsonValueTrait}`. Do not replace functions whose public return type is `serde_json::Error` (the type would change).
+
+**Status (2026-10-15)**: typed reads switched to `sonic_rs::from_str/from_slice` (build-checked): `aruaru-IME` (`aruaru-ime-core`, 178 tests pass), `aruaru-llm`, `aruaru-search`, `realdata.pro`, `open-backup`, `open-web-server`, `open-bar`, `webeditor-sftp`.
+`aruaru-llm`'s external imports use `parse_secure`. Code passing `Value` around and `fetch_cache` in `audiocafe-tokyo-rust` are not switched yet (type rewrite needed).

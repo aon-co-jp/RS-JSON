@@ -109,3 +109,7 @@ pub mod secure;
 pub use secure::{from_str_secure, parse_secure, Limits};
 #[cfg(feature = "fast")]
 pub use secure::{parse_secure_fast, parse_secure_sonic};
+
+/// 高速な読み書きと、JSON <-> RS-JSON(寛容な上位集合)の相互変換(任意機能`fast`、2026-10-15追加)。
+#[cfg(feature = "fast")]
+pub mod fast;

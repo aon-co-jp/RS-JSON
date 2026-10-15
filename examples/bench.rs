@@ -74,6 +74,28 @@ fn main() {
         rows.push(("parse_secure_fast (SIMD+安全)", fast));
     }
 
+    // 書き出し・変換(型付き構造体と、JSON <-> RS-JSON)
+    #[cfg(feature = "fast")]
+    {
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct Profile { age: i64, city: String, bio: String }
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct User { id: i64, name: String, email: String, active: bool, score: f64, tags: Vec<String>, profile: Profile }
+        println!("\n--- 型付き構造体の読み書き ---");
+        let users: Vec<User> = serde_json::from_str(&doc).unwrap();
+        let r_serde = bench("serde_json::from_str<Vec<User>>", bytes, || serde_json::from_str::<Vec<User>>(&doc).unwrap().len());
+        let r_fast = bench("rust_json::fast::from_str<Vec<User>>", bytes, || rust_json::fast::from_str::<Vec<User>>(&doc).unwrap().len());
+        let w_serde = bench("serde_json::to_string", bytes, || serde_json::to_string(&users).unwrap().len());
+        let w_fast = bench("rust_json::fast::to_string", bytes, || rust_json::fast::to_string(&users).unwrap().len());
+        println!("  読み {:.1}倍速 / 書き {:.1}倍速", r_serde / r_fast, w_serde / w_fast);
+        println!("\n--- JSON <-> RS-JSON 変換 ---");
+        let rs = rust_json::fast::json_to_rsjson(&doc, false).unwrap();
+        let a = bench("json_to_rsjson", bytes, || rust_json::fast::json_to_rsjson(&doc, false).unwrap().len());
+        let b = bench("rsjson_to_json (厳密JSON入力=高速経路)", bytes, || rust_json::fast::rsjson_to_json(&doc).unwrap().len());
+        let c = bench("rsjson_to_json (RS-JSON入力=寛容経路)", rs.len(), || rust_json::fast::rsjson_to_json(&rs).unwrap().len());
+        let _ = (a, b, c);
+    }
+
     println!("\nserde_json を 1.00 とした比:");
     for (l, t) in rows {
         println!("  {l:<30} {:.2}x の時間 ({:+.0}%)", t / base, (t / base - 1.0) * 100.0);
