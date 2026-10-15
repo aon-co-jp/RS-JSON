@@ -12,7 +12,7 @@
 
 use crate::full::RustJsonError;
 use serde::{Deserialize, Serialize};
-use sonic_rs::{JsonContainerTrait, JsonValueTrait};
+use sonic_rs::JsonContainerTrait;
 
 pub use sonic_rs;
 
@@ -279,6 +279,56 @@ pub fn to_rsjson<T: Serialize + ?Sized>(v: &T, pretty: bool) -> Result<String, R
     Ok(out)
 }
 
+/// ファイルの種類。拡張子 `.rsjson` / `.json5` / `.jsonc` は寛容(RS-JSON)、それ以外は厳密JSON扱い。
+fn is_lenient_path(p: &std::path::Path) -> bool {
+    matches!(p.extension().and_then(|e| e.to_str()), Some("rsjson" | "json5" | "jsonc"))
+}
+
+/// ファイルから型付き構造体を読む。UTF-8のBOMは無視。拡張子が `.rsjson`/`.json5`/`.jsonc` なら寛容構文も受理。
+pub fn read_file<T: serde::de::DeserializeOwned>(path: impl AsRef<std::path::Path>) -> Result<T, RustJsonError> {
+    let path = path.as_ref();
+    let text = std::fs::read_to_string(path).map_err(|e| rej(format!("{}: {e}", path.display())))?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    if is_lenient_path(path) {
+        from_rsjson(text)
+    } else {
+        sonic_rs::from_str(text).map_err(rej)
+    }
+}
+
+/// 型付き構造体をファイルへ書く。途中で壊れないよう、一時ファイルへ書いてから置き換える。
+/// 拡張子が `.rsjson` なら RS-JSON 形式(整形)、それ以外は整形した厳密JSON。
+pub fn write_file<T: Serialize + ?Sized>(path: impl AsRef<std::path::Path>, v: &T) -> Result<(), RustJsonError> {
+    let path = path.as_ref();
+    let text = if path.extension().and_then(|e| e.to_str()) == Some("rsjson") {
+        to_rsjson(v, true)?
+    } else {
+        sonic_rs::to_string_pretty(v).map_err(rej)?
+    };
+    let tmp = path.with_extension("tmp-write");
+    std::fs::write(&tmp, text).map_err(|e| rej(format!("{}: {e}", tmp.display())))?;
+    std::fs::rename(&tmp, path).map_err(|e| rej(format!("{}: {e}", path.display())))
+}
+
+/// ファイル変換。入力の内容から向きを決める: `.rsjson`/`.json5`/`.jsonc` → 厳密JSON、それ以外 → RS-JSON。
+pub fn convert_file(from: impl AsRef<std::path::Path>, to: impl AsRef<std::path::Path>, pretty: bool) -> Result<(), RustJsonError> {
+    let (from, to) = (from.as_ref(), to.as_ref());
+    let text = std::fs::read_to_string(from).map_err(|e| rej(format!("{}: {e}", from.display())))?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let out = if is_lenient_path(from) {
+        let j = rsjson_to_json(text)?;
+        if pretty {
+            let v: sonic_rs::Value = sonic_rs::from_str(&j).map_err(rej)?;
+            sonic_rs::to_string_pretty(&v).map_err(rej)?
+        } else {
+            j
+        }
+    } else {
+        json_to_rsjson(text, pretty)?
+    };
+    std::fs::write(to, out).map_err(|e| rej(format!("{}: {e}", to.display())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -323,6 +373,26 @@ mod tests {
             let b: serde_json::Value = serde_json::from_str(&back).unwrap();
             assert_eq!(a, b);
         }
+    }
+
+    #[test]
+    fn file_helpers_roundtrip_and_convert() {
+        let dir = std::env::temp_dir().join(format!("rsjson-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let s = S { name: "ファイル".into(), n: vec![1], ab: true };
+        let (j, r) = (dir.join("a.json"), dir.join("a.rsjson"));
+        write_file(&j, &s).unwrap();
+        write_file(&r, &s).unwrap();
+        assert_eq!(read_file::<S>(&j).unwrap(), s);
+        assert_eq!(read_file::<S>(&r).unwrap(), s);
+        assert!(std::fs::read_to_string(&r).unwrap().contains("name:"));
+        let back = dir.join("b.json");
+        convert_file(&r, &back, false).unwrap();
+        assert_eq!(read_file::<S>(&back).unwrap(), s);
+        std::fs::write(dir.join("c.json5"), "\u{feff}{name:'x', n:[], \"a-b\":true, // c\n}").unwrap();
+        assert_eq!(read_file::<S>(dir.join("c.json5")).unwrap().name, "x");
+        assert!(read_file::<S>(dir.join("missing.json")).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

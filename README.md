@@ -235,3 +235,17 @@ Switch reads to `parse_secure_sonic` and rewrite the consumers with `sonic_rs::{
 
 **Status (2026-10-15)**: typed reads switched to `sonic_rs::from_str/from_slice` (build-checked): `aruaru-IME` (`aruaru-ime-core`, 178 tests pass), `aruaru-llm`, `aruaru-search`, `realdata.pro`, `open-backup`, `open-web-server`, `open-bar`, `webeditor-sftp`.
 `aruaru-llm`'s external imports use `parse_secure`. Code passing `Value` around and `fetch_cache` in `audiocafe-tokyo-rust` are not switched yet (type rewrite needed).
+
+### 使い方の早見(`fast`機能、2026-10-16追加)
+```rust
+use rust_json::fast::{read_file, write_file, convert_file, rsjson_to_json, json_to_rsjson};
+let cfg: Config = read_file("config.rsjson")?;        // コメント・末尾カンマ入りでも読める(.rsjson/.json5/.jsonc)
+write_file("out.json", &cfg)?;                         // 一時ファイル経由で安全に書く(.rsjsonならRS-JSON形式)
+convert_file("a.rsjson", "a.json", true)?;             // ファイル変換(向きは拡張子で決まる)
+let json = rsjson_to_json("{ name: 'x', /* c */ }")?;  // 文字列の変換
+```
+コマンド: `cargo install --path . --features fast` で `rsjson` が入る。`rsjson to-json a.rsjson --pretty` / `rsjson to-rs a.json -o a.rsjson` / `rsjson check a.rsjson` / `rsjson fmt a.json`。
+
+### Quick reference (`fast` feature, added 2026-10-16)
+`read_file` / `write_file` (atomic via a temp file) / `convert_file` (direction chosen by extension: `.rsjson`/`.json5`/`.jsonc` are lenient) / `rsjson_to_json` / `json_to_rsjson`.
+CLI: `cargo install --path . --features fast` installs `rsjson` (`to-json`, `to-rs`, `check`, `fmt`; stdin/stdout when no file is given).

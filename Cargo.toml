@@ -30,4 +30,9 @@ sonic-rs = { version = "0.3", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 thiserror = { version = "1.0", optional = true }
 
+[[bin]]
+name = "rsjson"
+path = "src/bin/rsjson.rs"
+required-features = ["fast"]
+
 [dev-dependencies]
