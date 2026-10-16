@@ -93,7 +93,9 @@ fn main() {
         let a = bench("json_to_rsjson", bytes, || rust_json::fast::json_to_rsjson(&doc, false).unwrap().len());
         let b = bench("rsjson_to_json (厳密JSON入力=高速経路)", bytes, || rust_json::fast::rsjson_to_json(&doc).unwrap().len());
         let c = bench("rsjson_to_json (RS-JSON入力=寛容経路)", rs.len(), || rust_json::fast::rsjson_to_json(&rs).unwrap().len());
-        let _ = (a, b, c);
+        let a2 = bench("json_to_rsjson_unchecked (検証なし)", bytes, || rust_json::fast::json_to_rsjson_unchecked(&doc).len());
+        let c2 = bench("rsjson_to_json_unchecked (検証なし)", rs.len(), || rust_json::fast::rsjson_to_json_unchecked(&rs).len());
+        let _ = (a, b, c, a2, c2);
     }
 
     println!("\nserde_json を 1.00 とした比:");

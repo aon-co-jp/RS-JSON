@@ -258,6 +258,16 @@ fn unquote_keys(input: &str) -> String {
     String::from_utf8(out).unwrap_or_default()
 }
 
+/// 検証なし版の JSON -> RS-JSON(整形なし)。**入力が正しいJSONであることは呼ぶ側が保証する**
+/// (信頼できる入力用。誤った入力には誤った出力を返すだけで、メモリ安全性は損なわない)。
+pub fn json_to_rsjson_unchecked(input: &str) -> String {
+    unquote_keys(input)
+}
+
+/// 検証なし版の RS-JSON -> JSON。**入力が正しいRS-JSONであることは呼ぶ側が保証する**。
+pub fn rsjson_to_json_unchecked(input: &str) -> String {
+    lenient_to_strict_text(input)
+}
 /// 厳密JSON文字列 → RS-JSON文字列(識別子のキーは引用符無し)。`pretty`で整形。
 pub fn json_to_rsjson(input: &str, pretty: bool) -> Result<String, RustJsonError> {
     if !pretty {
@@ -393,6 +403,16 @@ mod tests {
         assert_eq!(read_file::<S>(dir.join("c.json5")).unwrap().name, "x");
         assert!(read_file::<S>(dir.join("missing.json")).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn unchecked_variants_match_checked_on_valid_input() {
+        let src = r#"{"name":"a b","a-b":[1,2.5,null,true],"o":{},"e":[],"k\"q":"x\\y","true":1,"é":2}"#;
+        assert_eq!(json_to_rsjson_unchecked(src), json_to_rsjson(src, false).unwrap());
+        let rs = json_to_rsjson(src, false).unwrap();
+        let a: serde_json::Value = serde_json::from_str(&rsjson_to_json_unchecked(&rs)).unwrap();
+        let b: serde_json::Value = serde_json::from_str(src).unwrap();
+        assert_eq!(a, b);
     }
 
     #[test]
