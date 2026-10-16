@@ -249,3 +249,7 @@ let json = rsjson_to_json("{ name: 'x', /* c */ }")?;  // 文字列の変換
 ### Quick reference (`fast` feature, added 2026-10-16)
 `read_file` / `write_file` (atomic via a temp file) / `convert_file` (direction chosen by extension: `.rsjson`/`.json5`/`.jsonc` are lenient) / `rsjson_to_json` / `json_to_rsjson`.
 CLI: `cargo install --path . --features fast` installs `rsjson` (`to-json`, `to-rs`, `check`, `fmt`; stdin/stdout when no file is given).
+
+---
+
+作者 / Author: 石塚正浩（MASAHIRO ISHIZUKA） (https://github.com/aon-co-jp)
