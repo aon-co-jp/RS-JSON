@@ -48,15 +48,39 @@ impl Limits {
 /// 文字列の中の括弧を数えないようにしながら、ネストの最大深さを1回の走査で求める。
 /// `limit`を超えた時点で打ち切る(巨大な入力でも、超えた位置までしか読まない)。
 fn depth_exceeds(bytes: &[u8], limit: usize) -> Option<usize> {
+    // 引用符の外では `[ { ] }` と `"` だけが意味を持ち、引用符の中では `\` と `"` だけが意味を持つ。
+    // それ以外のバイトを `memchr` 風に一括で読み飛ばすため、まず「注目するバイト」の表を引く。
+    const fn table(in_str: bool) -> [bool; 256] {
+        let mut t = [false; 256];
+        t[b'"' as usize] = true;
+        if in_str {
+            t[b'\\' as usize] = true;
+        } else {
+            t[b'[' as usize] = true;
+            t[b'{' as usize] = true;
+            t[b']' as usize] = true;
+            t[b'}' as usize] = true;
+        }
+        t
+    }
+    const OUT: [bool; 256] = table(false);
+    const IN: [bool; 256] = table(true);
     let (mut depth, mut i) = (0usize, 0usize);
     let mut in_str = false;
-    while i < bytes.len() {
+    let n = bytes.len();
+    while i < n {
+        let interesting = if in_str { &IN } else { &OUT };
+        while i < n && !interesting[bytes[i] as usize] {
+            i += 1;
+        }
+        if i >= n {
+            break;
+        }
         let b = bytes[i];
         if in_str {
             match b {
                 b'\\' => i += 1, // 次の1文字(\" など)を読み飛ばす
-                b'"' => in_str = false,
-                _ => {}
+                _ => in_str = false,
             }
         } else {
             match b {
@@ -67,8 +91,7 @@ fn depth_exceeds(bytes: &[u8], limit: usize) -> Option<usize> {
                         return Some(depth);
                     }
                 }
-                b']' | b'}' => depth = depth.saturating_sub(1),
-                _ => {}
+                _ => depth = depth.saturating_sub(1),
             }
         }
         i += 1;
@@ -211,20 +234,24 @@ pub fn parse_secure_sonic(input: &str, limits: &Limits) -> Result<sonic_rs::Valu
 }
 
 /// 値を歩いて、同じオブジェクトの中に同じキーが2回ある場合、そのキーを返す。
-/// 小さなオブジェクト(大半)は総当たり、大きなものはハッシュ集合で調べる。
+/// 小さなオブジェクト(大半)は、割り当てなしの総当たり(キーの長さが違えば比較を飛ばす)、
+/// 大きなものはハッシュ集合で調べる。葉(数値・文字列等)は降りない。
 #[cfg(feature = "fast")]
 fn find_duplicate_key(v: &sonic_rs::Value) -> Option<String> {
-    use sonic_rs::JsonContainerTrait; // `as_object`/`as_array`/`iter`
+    use sonic_rs::{JsonContainerTrait, JsonValueTrait};
     if let Some(obj) = v.as_object() {
         let keys: Vec<&str> = obj.iter().map(|(k, _)| k).collect();
-        if keys.len() <= 16 {
+        let n = keys.len();
+        if n <= 16 {
             for (i, a) in keys.iter().enumerate() {
-                if keys[i + 1..].contains(a) {
-                    return Some((*a).to_string());
+                for b in &keys[i + 1..] {
+                    if b.len() == a.len() && a == b {
+                        return Some((*a).to_string());
+                    }
                 }
             }
         } else {
-            let mut seen = std::collections::HashSet::with_capacity(keys.len());
+            let mut seen = std::collections::HashSet::with_capacity(n);
             for k in &keys {
                 if !seen.insert(*k) {
                     return Some((*k).to_string());
@@ -232,14 +259,18 @@ fn find_duplicate_key(v: &sonic_rs::Value) -> Option<String> {
             }
         }
         for (_, child) in obj.iter() {
-            if let Some(d) = find_duplicate_key(child) {
-                return Some(d);
+            if child.is_object() || child.is_array() {
+                if let Some(d) = find_duplicate_key(child) {
+                    return Some(d);
+                }
             }
         }
     } else if let Some(arr) = v.as_array() {
         for child in arr.iter() {
-            if let Some(d) = find_duplicate_key(child) {
-                return Some(d);
+            if child.is_object() || child.is_array() {
+                if let Some(d) = find_duplicate_key(child) {
+                    return Some(d);
+                }
             }
         }
     }
