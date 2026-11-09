@@ -26,9 +26,9 @@ fast = ["full", "dep:sonic-rs"]
 [dependencies]
 serde_json = { version = "1.0", optional = true }
 # SIMD版パーサ(任意機能`fast`)。依存先が内部でunsafeを使う。既定ではビルドに入らない。
-sonic-rs = { version = "0.3", optional = true }
+sonic-rs = { version = "0.5", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
-thiserror = { version = "1.0", optional = true }
+thiserror = { version = "2.0", optional = true }
 
 [[bin]]
 name = "rsjson"
