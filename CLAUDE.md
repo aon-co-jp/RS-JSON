@@ -358,3 +358,6 @@ CLI: `cargo install --path . --features fast` installs `rsjson` (`to-json`, `to-
 - **WASM по-прежнему остаётся технологией для интерфейса.** Изменилось лишь то, что вызываемый им API теперь построен на Connect.
 - Интерфейсы, форма которых задана внешним стандартом (ACME, обратные вызовы OAuth, вебхуки сторонних сервисов, проверки работоспособности, статические файлы, OTLP), остаются обычным HTTP.
 - **Если есть сомнения — выбирайте Connect.**
+
+## 2026-11-18 `light` の安全読み込み・書き出し追加(Reaxt向け)
+`light`(依存ゼロ、wasm向け)に `parse_light_secure`(`LightLimits`: サイズ・深さ・重複キー)、`quote_json`、`LightValue::{as_object, as_i64, to_json}` を追加(`9aca39a`)。Reaxtのwasmからserde/serde_jsonを排除するのが目的で、`aruaru-admin` の10画面が実際にこれで動く。wasmには必ず `light` を使い、serde系を入れない。試験は `cargo test --lib light`。

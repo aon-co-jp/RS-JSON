@@ -280,3 +280,6 @@ CLI: `cargo install --path . --features fast` installs `rsjson` (`to-json`, `to-
 7 MB・4万件で `parse_secure_sonic` は約70 ms → **約63 ms(約9%減)**。内訳の目安は、深さの事前検査 約13 ms・sonic-rs のパース 約35 ms・重複キー検査 約16〜24 ms。
 深さ検査は「注目するバイト」の表で読み飛ばす形に、重複キー検査は葉へ降りず・キー長が違えば比較を飛ばす形にした(いずれも安全な Rust のみ、`unsafe` なし、56テスト全通過)。
 **やらなかったこと**: SIMD(AVX2)での深さ検査は `unsafe` が要り方針(`unsafe_code = "deny"`)に反する・効くのはMB級のみ。GPU(open-cuda/open-directx)は分岐の多いJSONに不向きでGB級でないと割に合わない。小さな本文(約60バイト)は約1 µsで、速度目的の置き換えは不要。
+
+## 2026-11-18 追記: `light` の安全読み込み・書き出し
+追加(`src/light.rs`、`9aca39a`): `parse_light_secure`・`LightLimits`・`quote_json`・`LightValue::{as_object, as_i64, to_json}`。試験 `secure_tests`(2件)を含め `cargo test --lib light` 8件成功。利用側は [Reaxt](https://github.com/aon-co-jp/Reaxt)(`reaxt-actions` の `Wire`)。未了: `to_json` の浮動小数の厳密な往復、`light` のderiveマクロ連携。
