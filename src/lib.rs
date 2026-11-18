@@ -97,7 +97,7 @@
 /// 一切依存せず提供するモジュール(WASM等バイナリサイズ制約のある用途向け、
 /// 2026-07-21追加)。`full` featureの有無に関わらず常にビルド対象になる。
 pub mod light;
-pub use light::{parse_light, LightError, LightValue};
+pub use light::{parse_light, parse_light_secure, quote_json, LightError, LightLimits, LightValue};
 
 #[cfg(feature = "full")]
 pub mod full;

@@ -263,6 +263,154 @@ fn parse_object(chars: &mut Peekable<Chars>) -> Result<LightValue, LightError> {
     Ok(LightValue::Object(fields))
 }
 
+// ── 防御つき読み込みと書き出し(2026-11-18、Reaxtのwasmから serde_json を外すために追加) ──
+
+/// 信頼できない入力向けの上限(`secure::Limits`のserde_json非依存版)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LightLimits {
+    pub max_bytes: usize,
+    pub max_depth: usize,
+}
+
+impl LightLimits {
+    /// 小さな本文向け(1 MiB・深さ64)。
+    pub const fn small() -> Self {
+        LightLimits { max_bytes: 1 << 20, max_depth: 64 }
+    }
+}
+
+/// 上限つきの読み込み。サイズと入れ子の深さを**パース前**に検査し(再帰によるスタック枯渇を防ぐ)、
+/// 同じオブジェクト内の重複キーは拒否する。`parse_light`と同じくRFC 8259厳密モード。
+pub fn parse_light_secure(input: &str, limits: &LightLimits) -> Result<LightValue, LightError> {
+    if input.len() > limits.max_bytes {
+        return Err(LightError(format!("input too large: {} > {}", input.len(), limits.max_bytes)));
+    }
+    let (mut depth, mut in_str, mut esc) = (0usize, false, false);
+    for b in input.bytes() {
+        if in_str {
+            if esc {
+                esc = false;
+            } else if b == b'\\' {
+                esc = true;
+            } else if b == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match b {
+            b'"' => in_str = true,
+            b'[' | b'{' => {
+                depth += 1;
+                if depth > limits.max_depth {
+                    return Err(LightError(format!("nesting too deep (> {})", limits.max_depth)));
+                }
+            }
+            b']' | b'}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    let v = parse_light(input)?;
+    if let Some(k) = duplicate_key(&v) {
+        return Err(LightError(format!("duplicate key: {k}")));
+    }
+    Ok(v)
+}
+
+fn duplicate_key(v: &LightValue) -> Option<String> {
+    match v {
+        LightValue::Object(fields) => {
+            for (i, (k, x)) in fields.iter().enumerate() {
+                if fields[..i].iter().any(|(p, _)| p == k) {
+                    return Some(k.clone());
+                }
+                if let Some(d) = duplicate_key(x) {
+                    return Some(d);
+                }
+            }
+            None
+        }
+        LightValue::Array(items) => items.iter().find_map(duplicate_key),
+        _ => None,
+    }
+}
+
+/// JSON文字列リテラル(両端の`"`つき)にする。制御文字は`\uXXXX`へエスケープ。
+pub fn quote_json(s: &str) -> String {
+    let mut o = String::with_capacity(s.len() + 2);
+    o.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            '\r' => o.push_str("\\r"),
+            '\t' => o.push_str("\\t"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o.push('"');
+    o
+}
+
+impl LightValue {
+    pub fn as_object(&self) -> Option<&[(String, LightValue)]> {
+        match self {
+            LightValue::Object(f) => Some(f),
+            _ => None,
+        }
+    }
+
+    /// 整数として表せる数値だけを返す(小数・範囲外は`None`)。
+    pub fn as_i64(&self) -> Option<i64> {
+        let n = self.as_f64()?;
+        if n.fract() == 0.0 && n >= -9.007_199_254_740_992e15 && n <= 9.007_199_254_740_992e15 {
+            Some(n as i64)
+        } else {
+            None
+        }
+    }
+
+    /// コンパクトなJSON文字列にする(有限でない数は`null`)。
+    pub fn to_json(&self) -> String {
+        match self {
+            LightValue::Null => "null".to_string(),
+            LightValue::Bool(b) => b.to_string(),
+            LightValue::Number(n) if !n.is_finite() => "null".to_string(),
+            LightValue::Number(n) if n.fract() == 0.0 && n.abs() < 9.0e15 => format!("{}", *n as i64),
+            LightValue::Number(n) => n.to_string(),
+            LightValue::Str(s) => quote_json(s),
+            LightValue::Array(a) => format!("[{}]", a.iter().map(|x| x.to_json()).collect::<Vec<_>>().join(",")),
+            LightValue::Object(f) => format!("{{{}}}", f.iter().map(|(k, v)| format!("{}:{}", quote_json(k), v.to_json())).collect::<Vec<_>>().join(",")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod secure_tests {
+    use super::*;
+
+    #[test]
+    fn limits_depth_size_and_duplicates() {
+        let l = LightLimits { max_bytes: 100, max_depth: 3 };
+        assert!(parse_light_secure("[[[1]]]", &l).is_ok());
+        assert!(parse_light_secure("[[[[1]]]]", &l).is_err());
+        assert!(parse_light_secure(r#"["[[[[[[["]"#, &l).is_ok(), "文字列中の括弧は数えない");
+        assert!(parse_light_secure(&"1".repeat(101), &l).is_err());
+        assert!(parse_light_secure(r#"{"a":1,"a":2}"#, &l).is_err());
+        assert!(parse_light_secure(&"[".repeat(100_000), &LightLimits::small()).is_err(), "深い入れ子でスタックを使い切らない");
+    }
+
+    #[test]
+    fn quote_and_roundtrip() {
+        assert_eq!(quote_json("a\"b\\c\n\u{1}"), r#""a\"b\\c\n\u0001""#);
+        let v = parse_light(r#"{"a":[1,2.5,"x\"y",null,true],"b":{"c":-3}}"#).unwrap();
+        assert_eq!(parse_light(&v.to_json()).unwrap(), v);
+        assert_eq!(v.get("b").and_then(|b| b.get("c")).and_then(|c| c.as_i64()), Some(-3));
+        assert_eq!(LightValue::Number(2.5).as_i64(), None);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
