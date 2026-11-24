@@ -1,3 +1,5 @@
+> Latest translations / 翻訳の最新版: [0-LATEST-TRANSLATIONS.md](0-LATEST-TRANSLATIONS.md)
+
 # Rust-JSON
 
 **開発開始日: 2026-07-18**(このリポジトリのGitHub作成日)
